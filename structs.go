@@ -14,12 +14,19 @@ var (
 	DefaultTagName = "structs" // struct's field default tag name
 )
 
+// EncodeHookFunc is the callback function that can be used for data transformations.
+type EncodeHookFunc func(value reflect.Value) (result interface{}, err error)
+
 // Struct encapsulates a struct type to provide several high level functions
 // around the struct.
 type Struct struct {
 	raw     interface{}
 	value   reflect.Value
 	TagName string
+
+	// EncodeHook, if set, will be called for every struct field (recursively).
+	// This lets you modify the final value that will be set down onto the resulting map.
+	EncodeHook EncodeHookFunc
 }
 
 // New returns a new *Struct with the struct s. It panics if the s's kind is
@@ -102,6 +109,21 @@ func (s *Struct) FillMap(out map[string]interface{}) {
 		tagName, tagOpts := parseTag(field.Tag.Get(s.TagName))
 		if tagName != "" {
 			name = tagName
+		}
+
+		// Execute the encode hook, if any.
+		if s.EncodeHook != nil {
+			result, err := s.EncodeHook(val)
+			if err != nil {
+				panic(err)
+			}
+			if !reflect.DeepEqual(val.Interface(), result) {
+				// result is different from original val, use it as the final value.
+				out[name] = result
+				continue
+			}
+
+			// val is unchanged, keep going forward.
 		}
 
 		// if the value is a zero value and the field is marked as omitempty do
@@ -518,6 +540,7 @@ func (s *Struct) nested(val reflect.Value) interface{} {
 	case reflect.Struct:
 		n := New(val.Interface())
 		n.TagName = s.TagName
+		n.EncodeHook = s.EncodeHook
 		m := n.Map()
 
 		// do not add the converted value if there are no exported fields, ie:

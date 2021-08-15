@@ -683,6 +683,7 @@ func TestFillMap_Nil(t *testing.T) {
 	// nil should no
 	FillMap(T, nil)
 }
+
 func TestStruct(t *testing.T) {
 	var T = struct{}{}
 
@@ -1450,4 +1451,57 @@ func TestMap_InterfaceTypeWithMapValue(t *testing.T) {
 	}()
 
 	_ = Map(a)
+}
+
+func TestMap_EncodeHook(t *testing.T) {
+	type B struct {
+		Time time.Time `structs:"time"`
+	}
+	type A struct {
+		Time time.Time `structs:"time"`
+		B    B         `structs:"b"`
+	}
+
+	f := func(value reflect.Value) (interface{}, error) {
+		switch v := value.Interface().(type) {
+		case time.Time:
+			return v.Format(time.RFC3339), nil
+		}
+		return value.Interface(), nil
+	}
+
+	date := time.Date(2021, 8, 15, 0, 0, 0, 0, time.UTC)
+	s := New(A{Time: date, B: B{Time: date}})
+	s.EncodeHook = f
+
+	got := s.Map()
+	want := map[string]interface{}{
+		"time": "2021-08-15T00:00:00Z",
+		"b": map[string]interface{}{
+			"time": "2021-08-15T00:00:00Z",
+		},
+	}
+
+	if fmt.Sprintf("%#v", got) != fmt.Sprintf("%#v", want) {
+		t.Errorf("got (%#v) != want (%#v)", got, want)
+	}
+}
+
+func TestMap_EncodeHook_NilInterfaceValue(t *testing.T) {
+	type T struct {
+		Err error
+		I   interface{}
+	}
+
+	f := func(value reflect.Value) (interface{}, error) { return value.Interface(), nil }
+
+	defer func() {
+		if err := recover(); err != nil {
+			t.Error("Nil interface value should not panic")
+		}
+	}()
+
+	s := New(T{})
+	s.EncodeHook = f
+	_ = s.Map()
 }
